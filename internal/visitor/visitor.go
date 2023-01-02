@@ -1,35 +1,27 @@
-package main
+package visitor
 
 import (
 	"context"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"os"
 	"sort"
 	"sync"
 	"time"
 )
 
-func main() {
-	args := os.Args[1:]
-	fmt.Printf("URLS: %+v", args)
-	urlCh := parse(args)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	run(ctx, 1, urlCh)
-	fmt.Printf("\napplication is done")
+type urlParser interface {
+	Parse() <-chan string
 }
 
-func run(ctx context.Context, concurrency int, urlCh <-chan string) {
+func Run(ctx context.Context, concurrency int, p urlParser) {
 	responseCh := make(chan response)
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 	for i := 0; i < concurrency; i++ {
 		go func() {
 			defer wg.Done()
-			for u := range urlCh {
+			for u := range p.Parse() {
 				if err := ctx.Err(); err != nil {
 					fmt.Printf("\nrun must stop: %v", ctx.Err())
 					return
@@ -91,27 +83,6 @@ func sinkResponses(ctx context.Context, inCh chan response) (responses, error) {
 	}
 }
 
-type response struct {
-	Method     string
-	URL        string
-	BodySize   int
-	StatusCode int
-}
-
-type responses []response
-
-func (r responses) Len() int {
-	return len(r)
-}
-
-func (r responses) Less(i, j int) bool {
-	return r[i].BodySize > r[j].BodySize // descending order
-}
-
-func (r responses) Swap(i, j int) {
-	r[i], r[j] = r[j], r[i]
-}
-
 func visitURL(baseCtx context.Context, url string, resultCh chan<- response) error {
 	ctx, cancel := context.WithTimeout(baseCtx, 2*time.Second)
 	defer cancel()
@@ -163,31 +134,4 @@ func prepareRequest(ctx context.Context, url string) (*http.Request, error) {
 	}
 	req.Header.Set("User-Agent", "GO test exercise")
 	return req, nil
-}
-
-func parse(urls []string) <-chan string {
-	resultCh := make(chan string)
-
-	go func() {
-		defer close(resultCh)
-
-		for _, s := range urls {
-			if parsed, err := url.Parse(s); err != nil {
-				fmt.Printf("\ninvalid url %s: %s", s, err.Error())
-				continue
-			} else {
-				if parsed.Scheme == "" {
-					parsed.Scheme = "http"
-				}
-
-				parsedURL := parsed.String()
-				fmt.Printf("\nURL %s is ok", parsedURL)
-				resultCh <- parsedURL
-			}
-		}
-
-		fmt.Printf("\nAll URLs parsed!")
-	}()
-
-	return resultCh
 }
