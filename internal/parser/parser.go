@@ -2,11 +2,15 @@ package parser
 
 import (
 	"bufio"
-	"fmt"
+	"github.com/rs/zerolog/log"
 	"io"
 	"net/url"
+	"regexp"
 	"strings"
 )
+
+// taken from stackoverflow - not tested well
+var urlRegexp = regexp.MustCompile(`[(http(s)?):\/\/(www\.)?a-zA-Z0-9@:%._\+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_\+.~#?&//=]*)`)
 
 type SourceFunc func() <-chan string
 
@@ -48,15 +52,20 @@ func NewParser(source SourceFunc) *Parser {
 	return &Parser{source: source}
 }
 
-func (p *Parser) Parse() <-chan string {
+func (p *Parser) URLs() <-chan string {
 	resultCh := make(chan string)
 
 	go func() {
 		defer close(resultCh)
 
 		for s := range p.source() {
+			if !urlRegexp.MatchString(s) {
+				log.Error().Msgf("invalid url [%s]", s)
+				continue
+			}
+
 			if parsed, err := url.Parse(s); err != nil {
-				fmt.Printf("\ninvalid url %s: %s", s, err.Error())
+				log.Error().Msgf("invalid url [%s]: %s", s, err.Error())
 				continue
 			} else {
 				if parsed.Scheme == "" {
@@ -64,12 +73,9 @@ func (p *Parser) Parse() <-chan string {
 				}
 
 				parsedURL := parsed.String()
-				fmt.Printf("\nURL %s is ok", parsedURL)
 				resultCh <- parsedURL
 			}
 		}
-
-		fmt.Printf("\nAll URLs parsed!")
 	}()
 
 	return resultCh

@@ -3,6 +3,7 @@ package visitor
 import (
 	"context"
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"io"
 	"net/http"
 	"sort"
@@ -10,97 +11,115 @@ import (
 	"time"
 )
 
+// makes visitor easier to test
 type urlParser interface {
-	Parse() <-chan string
+	URLs() <-chan string
 }
 
-func Run(ctx context.Context, concurrency int, p urlParser) {
-	responseCh := make(chan response)
+type webClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+type URLVisitor struct {
+	// makes it testable
+	client webClient
+}
+
+func NewDefaultClient(d time.Duration) webClient {
+	return &http.Client{
+		Timeout: d,
+	}
+}
+
+func NewURLVisitor(client webClient) *URLVisitor {
+	return &URLVisitor{client: client}
+}
+
+func (v *URLVisitor) Run(ctx context.Context, concurrency int, p urlParser) {
+	responseCh := make(chan visitResult)
+
 	var wg sync.WaitGroup
-	urlsCh := p.Parse()
+	urlsCh := p.URLs()
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for u := range urlsCh {
 				if err := ctx.Err(); err != nil {
-					fmt.Printf("\nrun must stop: %v", ctx.Err())
+					log.Warn().Msgf("URLVisitor Run must stop: %v", ctx.Err())
 					return
 				}
 
-				if err := visitURL(ctx, u, responseCh); err != nil {
-					fmt.Printf("\ncould not visit url [%s]: %s", u, err)
+				if err := v.visitURL(ctx, u, responseCh); err != nil {
+					log.Error().Msgf("could not visit url [%s]: %s", u, err.Error())
 					continue
 				}
 			}
 
-			fmt.Printf("\nall urls have been visited")
 		}()
 	}
 
 	doneCh := handleResponses(ctx, responseCh)
-
 	wg.Wait()
+
+	log.Info().Msgf("all urls have been visited")
+
 	close(responseCh)
 	<-doneCh
 }
 
-func handleResponses(ctx context.Context, responseCh chan response) <-chan struct{} {
+func handleResponses(ctx context.Context, responseCh chan visitResult) <-chan struct{} {
 	doneCh := make(chan struct{})
 
 	go func() {
 		defer close(doneCh)
 
-		allResponses, err := sinkResponses(ctx, responseCh)
+		allVisits, err := sinkVisitResults(ctx, responseCh)
 		if err != nil {
-			return // todo: log
+			log.Error().Msgf("could not retrieve all visitResults as a slice: %s", err.Error())
+			return
 		}
 
-		sort.Sort(allResponses)
+		sort.Sort(allVisits)
 
-		for i := range allResponses {
-			fmt.Printf("\nURL: %s => BodySize: %d", allResponses[i].URL, allResponses[i].BodySize)
+		for i := range allVisits {
+			log.Info().Msgf("URL: %s => BodySize: %d", allVisits[i].URL, allVisits[i].BodySize)
 		}
 	}()
 
 	return doneCh
 }
 
-func sinkResponses(ctx context.Context, inCh chan response) (responses, error) {
-	allResponses := make(responses, 0)
+func sinkVisitResults(ctx context.Context, visitCh chan visitResult) (visitResults, error) {
+	allVisits := make(visitResults, 0)
+
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Printf("\n\nhandleResponses must stop: %v", ctx.Err())
+			log.Warn().Msgf("sinkVisitResults must stop: %v", ctx.Err())
 			return nil, ctx.Err()
-		case resp, ok := <-inCh:
+		case visit, ok := <-visitCh:
 			if ok {
-				fmt.Printf("\nreceived response %s", resp.URL)
-				allResponses = append(allResponses, resp)
+				allVisits = append(allVisits, visit)
 			} else {
-				return allResponses, nil
+				return allVisits, nil
 			}
 		}
 	}
 }
 
-func visitURL(baseCtx context.Context, url string, resultCh chan<- response) error {
-	ctx, cancel := context.WithTimeout(baseCtx, 2*time.Second)
-	defer cancel()
-
+func (v *URLVisitor) visitURL(ctx context.Context, url string, resultCh chan<- visitResult) error {
 	req, err := prepareRequest(ctx, url)
 	if err != nil {
-		fmt.Printf("could not build request for url [%s]", url)
-		return err
+		return fmt.Errorf("could not build request for url [%s]: %w", url, err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := v.client.Do(req)
 	if err != nil {
-		fmt.Printf("\nrequest %s to url [%s] failed: %s", req.Method, url, err.Error())
-		return err
+		return fmt.Errorf("request %s to url [%s] failed: %w", req.Method, url, err)
 	}
 
-	result := response{
+	result := visitResult{
 		Method:     req.Method,
 		URL:        url,
 		StatusCode: resp.StatusCode,
@@ -108,30 +127,29 @@ func visitURL(baseCtx context.Context, url string, resultCh chan<- response) err
 
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			fmt.Printf("could not close body of url [%s] resp: %s", url, err.Error())
+			log.Error().Msgf("could not close body of url [%s] resp: %s", url, err.Error())
 		}
-
-		resultCh <- result
 	}()
 
 	if resp.StatusCode >= 300 {
 		result.BodySize = 0
+		log.Error().Msgf("received non 200 code %d from url [%s]", resp.StatusCode, url)
 	} else {
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			fmt.Printf("could not get body from url [%s]: %s", url, err.Error())
-			return err
+			log.Error().Msgf("could not get body from url [%s]: %v", url, err)
 		}
 		result.BodySize = len(body)
 	}
 
+	resultCh <- result
 	return nil
 }
 
 func prepareRequest(ctx context.Context, url string) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not prepare request: %w", err)
 	}
 	req.Header.Set("User-Agent", "GO test exercise")
 	return req, nil

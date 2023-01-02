@@ -1,4 +1,7 @@
 https://ya.ru
 example.com
+not-even-an-url
 httpbin.org/status/200
 cnn.com
+invalid.invalid
+https://www.ozon.ru/product/apache-kafka-potokovaya-obrabotka-i-analiz-dannyh-palino-todd-shapira-gven-211433011/?asb=MG2rhPcYa7n2b21JkeMshUoFKYWZVBM4eO4AAOeZFmc%253D&asb2=NvGgoSCrNXyGmJygqGoKmY_eaj7iE-8ZEEdxaSszCL-s01hC7iPFFIj1SUMnYSLb&avtc=1&avte=2&avts=1672684761&keywords=kafka&sh=x1UTQ345Vg
