@@ -11,10 +11,17 @@ import (
 
 func main() {
 	args := os.Args[1:]
-	fmt.Printf("URLS: %+v", args)
-	p := parser.NewParser(parser.SliceSource(args))
+	var sourceFunc parser.SourceFunc
+	if len(args) == 0 {
+		// read from stdin - cat urls.txt | ./app
+		sourceFunc = parser.ReaderSource(os.Stdin)
+	} else {
+		sourceFunc = parser.SliceSource(args)
+	}
+
+	p := parser.NewParser(sourceFunc)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	visitor.Run(ctx, 1, p)
+	visitor.Run(ctx, 2, p)
 	fmt.Printf("\napplication is done")
 }

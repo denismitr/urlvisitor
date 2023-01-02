@@ -1,7 +1,9 @@
 package parser
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 )
@@ -18,6 +20,22 @@ func SliceSource(urls []string) SourceFunc {
 			}
 		}()
 
+		return resultCh
+	}
+}
+
+func ReaderSource(r io.Reader) SourceFunc {
+	return func() <-chan string {
+		resultCh := make(chan string)
+		go func() {
+			defer close(resultCh)
+			scanner := bufio.NewScanner(r)
+			scanner.Split(bufio.ScanLines)
+			for scanner.Scan() {
+				resultCh <- strings.Trim(scanner.Text(), " ")
+			}
+			return
+		}()
 		return resultCh
 	}
 }

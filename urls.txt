@@ -1,0 +1,4 @@
+https://ya.ru
+example.com
+httpbin.org/status/200
+cnn.com

@@ -17,11 +17,12 @@ type urlParser interface {
 func Run(ctx context.Context, concurrency int, p urlParser) {
 	responseCh := make(chan response)
 	var wg sync.WaitGroup
-	wg.Add(concurrency)
+	urlsCh := p.Parse()
 	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for u := range p.Parse() {
+			for u := range urlsCh {
 				if err := ctx.Err(); err != nil {
 					fmt.Printf("\nrun must stop: %v", ctx.Err())
 					return

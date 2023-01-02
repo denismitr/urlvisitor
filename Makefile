@@ -5,5 +5,8 @@ TASKS = run build
 build:
 	go build -race -o ./bin/app ./cmd/app/app.go || exit 1
 
-run: build
+run-urls: build
 	./bin/app $(URLS)
+
+run-file: build
+	cat ./urls.txt | ./bin/app
