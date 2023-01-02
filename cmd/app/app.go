@@ -6,7 +6,8 @@ import (
 	"github.com/denismitr/urlvisitor/internal/parser"
 	"github.com/denismitr/urlvisitor/internal/visitor"
 	"os"
-	"time"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
@@ -20,8 +21,19 @@ func main() {
 	}
 
 	p := parser.NewParser(sourceFunc)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	go gracefulShutdown(cancel)
+
 	visitor.Run(ctx, 2, p)
-	fmt.Printf("\napplication is done")
+	fmt.Printf("\napplication is done!")
+}
+
+func gracefulShutdown(cancel context.CancelFunc) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(ch)
+	<-ch
+	cancel()
 }
