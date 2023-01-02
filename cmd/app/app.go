@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/denismitr/urlvisitor/internal/parser"
 	"github.com/denismitr/urlvisitor/internal/visitor"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"io"
 	"os"
 	"os/signal"
 	"strconv"
@@ -22,18 +24,24 @@ func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	args := os.Args[1:]
 	var sourceFunc parser.SourceFunc
 	if len(args) == 0 {
 		// read from stdin - cat urls.txt | ./app
-		sourceFunc = parser.ReaderSource(os.Stdin)
+		stdin, err := resolveStdin()
+		if err != nil {
+			log.Error().Msgf("input error: %v", err)
+			os.Exit(1)
+		}
+		sourceFunc = parser.ReaderSource(ctx, stdin)
 	} else {
-		sourceFunc = parser.SliceSource(args)
+		sourceFunc = parser.SliceSource(ctx, args)
 	}
 
 	p := parser.NewParser(sourceFunc)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	go gracefulShutdown(cancel)
 
@@ -44,6 +52,20 @@ func main() {
 	visitor.NewURLVisitor(client).Run(ctx, concurrency, p)
 
 	log.Info().Msgf("application is done!")
+}
+
+func resolveStdin() (io.Reader, error) {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	size := fi.Size()
+	if size == 0 {
+		return nil, fmt.Errorf("no urls were provided via stdin")
+	}
+
+	return os.Stdin, nil
 }
 
 func resolveHttpTimeout() time.Duration {

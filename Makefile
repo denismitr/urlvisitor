@@ -1,13 +1,16 @@
-TASKS = run-urls run-file build deps
+TASKS = run-urls run-file build deps build-race
 
 .PHONY: $(TASKS)
 
 deps:
-	go mod tidy -compat=1.17
+	go mod tidy
 	go mod vendor
 
-build: deps
+build-race: deps
 	go build -race -o ./bin/app ./cmd/app/app.go || exit 1
+
+build: deps
+	go build -o ./bin/app ./cmd/app/app.go || exit 1
 
 run-urls: build
 	MAX_CONCURRENCY=2  ./bin/app $(URLS)

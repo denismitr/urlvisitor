@@ -55,7 +55,6 @@ func (v *URLVisitor) Run(ctx context.Context, concurrency int, p urlParser) {
 					continue
 				}
 			}
-
 		}()
 	}
 
@@ -135,11 +134,12 @@ func (v *URLVisitor) visitURL(ctx context.Context, url string, resultCh chan<- v
 		result.BodySize = 0
 		log.Error().Msgf("received non 200 code %d from url [%s]", resp.StatusCode, url)
 	} else {
-		body, err := io.ReadAll(resp.Body)
+		// count without allocating
+		size, err := io.Copy(io.Discard, resp.Body)
 		if err != nil {
-			log.Error().Msgf("could not get body from url [%s]: %v", url, err)
+			log.Error().Msgf("could not count body size of url [%s] response: %v", url, err)
 		}
-		result.BodySize = len(body)
+		result.BodySize = size
 	}
 
 	resultCh <- result

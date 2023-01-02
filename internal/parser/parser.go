@@ -2,6 +2,7 @@ package parser
 
 import (
 	"bufio"
+	"context"
 	"github.com/rs/zerolog/log"
 	"io"
 	"net/url"
@@ -14,12 +15,17 @@ var urlRegexp = regexp.MustCompile(`[(http(s)?):\/\/(www\.)?a-zA-Z0-9@:%._\+~#=]
 
 type SourceFunc func() <-chan string
 
-func SliceSource(urls []string) SourceFunc {
+func SliceSource(ctx context.Context, urls []string) SourceFunc {
 	return func() <-chan string {
 		resultCh := make(chan string)
 		go func() {
 			defer close(resultCh)
 			for _, u := range urls {
+				if err := ctx.Err(); err != nil {
+					log.Error().Msgf("slice source received context error: %w", err.Error())
+					return
+				}
+
 				resultCh <- strings.Trim(u, " ")
 			}
 		}()
@@ -28,14 +34,21 @@ func SliceSource(urls []string) SourceFunc {
 	}
 }
 
-func ReaderSource(r io.Reader) SourceFunc {
+func ReaderSource(ctx context.Context, r io.Reader) SourceFunc {
 	return func() <-chan string {
 		resultCh := make(chan string)
 		go func() {
-			defer close(resultCh)
+			defer func() {
+				close(resultCh)
+			}()
+
 			scanner := bufio.NewScanner(r)
 			scanner.Split(bufio.ScanLines)
 			for scanner.Scan() {
+				if err := ctx.Err(); err != nil {
+					log.Error().Msgf("reader source received context error: %w", err.Error())
+					return
+				}
 				resultCh <- strings.Trim(scanner.Text(), " ")
 			}
 			return

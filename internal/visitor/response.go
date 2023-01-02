@@ -3,7 +3,7 @@ package visitor
 type visitResult struct {
 	Method     string
 	URL        string
-	BodySize   int
+	BodySize   int64
 	StatusCode int
 }
 
